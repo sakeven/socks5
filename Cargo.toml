@@ -1,0 +1,18 @@
+[package]
+name = "socks5"
+version = "0.1.0"
+authors = ["sakeven <sakeven.jiang@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+chacha = "0.3.0"
+rand = "0.8.2"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
