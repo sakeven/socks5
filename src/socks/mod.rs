@@ -2,8 +2,6 @@
 
 // Package socks5 implements socks5 proxy protocol.
 
-use std::pin::Pin;
-
 use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -140,7 +138,8 @@ impl TCPRelay {
         // RSV
         let _ = conn.read_u8().await.unwrap();
 
-        let addr = address::get_raw_address(Pin::new(conn)).await.unwrap();
+        // let addr = address::get_raw_address(Pin::new(conn)).await.unwrap();
+        let addr = address::get_raw_address(conn).await.unwrap();
         if DEBUG {
             println!("{:?}", addr);
         }

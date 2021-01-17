@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
-// Package socks5 implements socks5 proxy protocol.
-use std::pin::Pin;
+// Package mika implements ss proxy protocol.
 
 use tokio::io;
 use tokio::io::AsyncReadExt;
@@ -32,25 +31,6 @@ impl TCPRelay {
         println!("serve stopped");
     }
 
-    // The SOCKS request is formed as follows:
-    //         +------+----------+----------+
-    //         | ATYP | DST.ADDR | DST.PORT |
-    //         +------+----------+----------+
-    //         |  1   | Variable |    2     |
-    //         +------+----------+----------+
-    // Where:
-    //           o  ATYP   address type of following address
-    //              o  IP V4 address: X’01’
-    //              o  DOMAINNAME: X’03’
-    //              o  IP V6 address: X’04’
-    //           o  DST.ADDR       desired destination address
-    //           o  DST.PORT desired destination port in network octet order
-
-    // parse_request parses socks5 client request.
-    async fn parse_request(&mut self, conn: &mut TcpStream) -> io::Result<address::Address> {
-        return address::get_address(Pin::new(conn)).await;
-    }
-
     // connect handles CONNECT cmd
     // Here is a bit magic. It acts as a mika client that redirects conntion to mika server.
     async fn connect(self, conn: TcpStream) {
@@ -60,9 +40,7 @@ impl TCPRelay {
         let mut client_reader = CryptoReader::new(&mut cr, nonce);
 
         // get cmd and address
-        let addr = address::get_address(Pin::new(&mut client_reader))
-            .await
-            .unwrap();
+        let addr = address::get_address(&mut client_reader).await.unwrap();
         let remote = TCPRelay::new_conn(addr).await;
         let (mut rr, mut rw) = remote.into_split();
         tokio::spawn(async move {

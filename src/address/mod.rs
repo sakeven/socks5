@@ -1,5 +1,4 @@
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
-use std::pin;
 use std::str;
 use std::vec;
 
@@ -53,8 +52,7 @@ impl ToSocketAddrs for Address {
 //    follow, there is no terminating NUL octet.
 //			o  X’04’
 //    the address is a version-6 IP address, with a length of 16 octets.
-pub async fn get_address<T: Unpin + AsyncReadExt>(rp: pin::Pin<&mut T>) -> io::Result<Address> {
-    let r = unsafe { rp.get_unchecked_mut() };
+pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Address> {
     let atyp = r.read_u8().await.unwrap();
     if DEBUG {
         println!("ATYP {}", atyp);
@@ -120,8 +118,7 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(rp: pin::Pin<&mut T>) -> io::R
     }
 }
 
-pub async fn get_raw_address<T: Unpin + AsyncReadExt>(rp: pin::Pin<&mut T>) -> io::Result<Vec<u8>> {
-    let r = unsafe { rp.get_unchecked_mut() };
+pub async fn get_raw_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Vec<u8>> {
     let atyp = r.read_u8().await.unwrap();
     if DEBUG {
         println!("ATYP {}", atyp);
