@@ -8,6 +8,9 @@ edition = "2018"
 tokio = { version = "1", features = ["full"] }
 chacha = "0.3.0"
 rand = "0.8.2"
+serde_yaml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+aes-gcm = "0.8.0"
 
 [[bin]]
 name = "client"

@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 // Package mika implements ss proxy protocol.
-
 use tokio::io;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -26,30 +25,26 @@ impl TCPRelay {
     }
 
     // serve handles connection between socks5 client and remote addr.
-    pub async fn serve(self, conn: TcpStream) {
-        self.connect(conn).await;
-        println!("serve stopped");
-    }
-
-    // connect handles CONNECT cmd
-    // Here is a bit magic. It acts as a mika client that redirects conntion to mika server.
-    async fn connect(self, conn: TcpStream) {
+    pub async fn serve(self, conn: TcpStream, secret_key: &[u8; 32]) {
         let (mut cr, mut cw) = conn.into_split();
         let mut nonce = [0u8; 8];
         cr.read_exact(&mut nonce).await.unwrap();
-        let mut client_reader = CryptoReader::new(&mut cr, nonce);
+        let mut client_reader = CryptoReader::new(&mut cr, nonce, &secret_key);
 
         // get cmd and address
         let addr = address::get_address(&mut client_reader).await.unwrap();
         let remote = TCPRelay::new_conn(addr).await;
         let (mut rr, mut rw) = remote.into_split();
+        let sk = secret_key.clone();
         tokio::spawn(async move {
-            let mut client_writer = CryptoWriter::new(&mut cw);
+            let mut client_writer = CryptoWriter::new(&mut cw, &sk);
             io::copy(&mut rr, &mut client_writer).await
         });
         if let Err(e) = io::copy(&mut client_reader, &mut rw).await {
             println!("io copy failed {}", e);
+            return;
         }
+        println!("serve stopped");
     }
 
     async fn new_conn(addr: address::Address) -> TcpStream {

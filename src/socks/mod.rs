@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 // Package socks5 implements socks5 proxy protocol.
-
 use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -30,7 +29,7 @@ impl TCPRelay {
     }
 
     // serve handles connection between socks5 client and remote addr.
-    pub async fn serve(mut self, mut conn: TcpStream) {
+    pub async fn serve(mut self, mut conn: TcpStream, secret_key: &[u8; 32]) {
         self.hand_shake(&mut conn).await;
 
         // get cmd and address
@@ -39,7 +38,7 @@ impl TCPRelay {
 
         match cmd {
             CONNECT => {
-                self.connect(conn, addr).await;
+                self.connect(conn, addr, secret_key).await;
             }
             UDP_ASSOCIATE => self.udp_associate(&mut conn).await,
             BIND => {}
@@ -143,6 +142,7 @@ impl TCPRelay {
         if DEBUG {
             println!("{:?}", addr);
         }
+
         Ok((cmd, addr))
     }
 
@@ -191,18 +191,18 @@ impl TCPRelay {
     }
 
     // connect handles CONNECT cmd
-    // Here is a bit magic. It acts as a mika client that redirects conntion to mika server.
-    async fn connect(self, conn: TcpStream, addr: Vec<u8>) {
+    // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
+    async fn connect(self, conn: TcpStream, addr: Vec<u8>, secret_key: &[u8; 32]) {
         let server = TcpStream::connect(self.ss_server).await.unwrap();
         let (mut cr, mut cw) = conn.into_split();
         let (mut rr, mut rw) = server.into_split();
-        let mut server_writer = CryptoWriter::new(&mut rw);
-
+        let mut server_writer = CryptoWriter::new(&mut rw, secret_key);
+        let sk = secret_key.clone();
         server_writer.write(addr.as_slice()).await.unwrap();
         tokio::spawn(async move {
             let mut iv = [0u8; 8];
             rr.read_exact(&mut iv).await.unwrap();
-            let mut server_reader = CryptoReader::new(&mut rr, iv);
+            let mut server_reader = CryptoReader::new(&mut rr, iv, &sk);
             io::copy(&mut server_reader, &mut cw).await
         });
         if let Err(e) = io::copy(&mut cr, &mut server_writer).await {
