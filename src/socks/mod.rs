@@ -173,7 +173,6 @@ impl TCPRelay {
     //           o  BND.ADDR       server bound address
     //           o  BND.PORT       server bound port in network octet order
     async fn reply(&mut self, conn: &mut TcpStream) {
-        println!("Reply socks5 client");
         let _ = conn
             .write(&[
                 SOCKSV5,
@@ -200,9 +199,7 @@ impl TCPRelay {
         let sk = secret_key.clone();
         server_writer.write(addr.as_slice()).await.unwrap();
         tokio::spawn(async move {
-            let mut iv = [0u8; 8];
-            rr.read_exact(&mut iv).await.unwrap();
-            let mut server_reader = CryptoReader::new(&mut rr, iv, &sk);
+            let mut server_reader = CryptoReader::new(&mut rr, &sk);
             io::copy(&mut server_reader, &mut cw).await
         });
         if let Err(e) = io::copy(&mut cr, &mut server_writer).await {

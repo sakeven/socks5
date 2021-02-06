@@ -35,7 +35,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _cfg = cfg.clone();
         let sk = secret_key.clone();
         tokio::spawn(async move {
-            println!("{}", _cfg.server[0].port);
+            // println!("{}", _cfg.server[0].port);
             handle(stream, _server, &sk).await;
         });
     }

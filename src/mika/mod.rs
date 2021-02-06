@@ -2,7 +2,6 @@
 
 // Package mika implements ss proxy protocol.
 use tokio::io;
-use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
 use crate::address;
@@ -27,9 +26,7 @@ impl TCPRelay {
     // serve handles connection between socks5 client and remote addr.
     pub async fn serve(self, conn: TcpStream, secret_key: &[u8; 32]) {
         let (mut cr, mut cw) = conn.into_split();
-        let mut nonce = [0u8; 8];
-        cr.read_exact(&mut nonce).await.unwrap();
-        let mut client_reader = CryptoReader::new(&mut cr, nonce, &secret_key);
+        let mut client_reader = CryptoReader::new(&mut cr, &secret_key);
 
         // get cmd and address
         let addr = address::get_address(&mut client_reader).await.unwrap();

@@ -2,7 +2,7 @@ use rand::{thread_rng, Rng};
 
 use chacha::{ChaCha, KeyStream};
 
-use super::interface::Crypto;
+use super::interface::{Decrypto, Encrypto};
 
 pub struct ChaCha0 {
     chacha: ChaCha,
@@ -35,21 +35,37 @@ impl ChaCha0 {
     }
 }
 
-impl Crypto for ChaCha0 {
-    fn encrypt(&mut self, plaintext: &[u8]) -> &Vec<u8> {
+impl Encrypto for ChaCha0 {
+    fn encrypt_init(&mut self) -> &Vec<u8> {
         self.vbuf.clear();
-        let mut idx = 0;
-        if !self.inited {
-            self.vbuf.extend_from_slice(&*self.nonce);
-            self.inited = true;
-            idx = self.nonce.len();
-        }
-        self.vbuf.extend_from_slice(plaintext);
-        self.chacha.xor_read(&mut self.vbuf[idx..]).unwrap();
+        self.vbuf.extend_from_slice(&*self.nonce);
+        self.inited = true;
         &self.vbuf
     }
 
-    fn decrypt(&mut self, plaintext: &mut [u8]) {
+    fn encrypt(&mut self, plaintext: &[u8]) -> &Vec<u8> {
+        self.vbuf.clear();
+        self.vbuf.extend_from_slice(plaintext);
+        self.chacha.xor_read(&mut self.vbuf[..]).unwrap();
+        &self.vbuf
+    }
+}
+
+impl Decrypto for ChaCha0 {
+    fn decrypt(&mut self, plaintext: &mut [u8]) -> usize {
+        if !self.inited {
+            self.nonce.copy_from_slice(plaintext);
+            self.inited = true;
+            return 0;
+        }
         self.chacha.xor_read(plaintext).unwrap();
+        return plaintext.len();
+    }
+
+    fn next_size(&mut self) -> i32 {
+        if self.inited {
+            return -1;
+        }
+        8
     }
 }

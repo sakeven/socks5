@@ -5,8 +5,6 @@ use std::vec;
 use tokio::io;
 use tokio::io::AsyncReadExt;
 
-const DEBUG: bool = true;
-
 pub const IPV4_ADDR: u8 = 0x1;
 pub const DOMAIN_ADDR: u8 = 0x3;
 pub const IPV6_ADDR: u8 = 0x4;
@@ -54,9 +52,6 @@ impl ToSocketAddrs for Address {
 //    the address is a version-6 IP address, with a length of 16 octets.
 pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Address> {
     let atyp = r.read_u8().await.unwrap();
-    if DEBUG {
-        println!("ATYP {}", atyp);
-    }
 
     let raw_addr_len = match atyp {
         IPV4_ADDR => IPV4_LEN,
@@ -71,17 +66,10 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
         }
     };
 
-    if DEBUG {
-        println!("len {}", raw_addr_len);
-    }
-
     let mut raw_addr = [0u8; 260];
     let _ = r.read_exact(&mut raw_addr[0..raw_addr_len]).await;
 
     let port = r.read_u16().await.unwrap();
-    if DEBUG {
-        println!("Port {}", port);
-    }
 
     match atyp {
         IPV4_ADDR => {
@@ -120,9 +108,6 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
 
 pub async fn get_raw_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Vec<u8>> {
     let atyp = r.read_u8().await.unwrap();
-    if DEBUG {
-        println!("ATYP {}", atyp);
-    }
 
     let mut raw_addr = [0u8; 260];
     raw_addr[0] = atyp;
@@ -137,7 +122,6 @@ pub async fn get_raw_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<V
         }
         IPV6_ADDR => IPV6_LEN,
         _ => {
-            println!("unsupported address type");
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "unsupported address type",

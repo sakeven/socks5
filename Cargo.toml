@@ -11,6 +11,8 @@ rand = "0.8.2"
 serde_yaml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 aes-gcm = "0.8.0"
+futures = "0.3.12"
+bytes = "1.0.1"
 
 [[bin]]
 name = "client"
