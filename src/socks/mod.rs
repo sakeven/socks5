@@ -29,7 +29,7 @@ impl TCPRelay {
     }
 
     // serve handles connection between socks5 client and remote addr.
-    pub async fn serve(mut self, mut conn: TcpStream, secret_key: &[u8; 32]) {
+    pub async fn serve(mut self, mut conn: TcpStream, secret_key: &Vec<u8>) {
         self.hand_shake(&mut conn).await;
 
         // get cmd and address
@@ -44,8 +44,6 @@ impl TCPRelay {
             BIND => {}
             _ => {}
         }
-
-        println!("serve stopped");
     }
 
     // version identifier/method selection message
@@ -191,7 +189,7 @@ impl TCPRelay {
 
     // connect handles CONNECT cmd
     // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
-    async fn connect(self, conn: TcpStream, addr: Vec<u8>, secret_key: &[u8; 32]) {
+    async fn connect(self, conn: TcpStream, addr: Vec<u8>, secret_key: &Vec<u8>) {
         let server = TcpStream::connect(self.ss_server).await.unwrap();
         let (mut cr, mut cw) = conn.into_split();
         let (mut rr, mut rw) = server.into_split();

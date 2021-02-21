@@ -13,6 +13,8 @@ serde = { version = "1.0", features = ["derive"] }
 aes-gcm = "0.8.0"
 futures = "0.3.12"
 bytes = "1.0.1"
+rust-crypto = "0.2.36"
+hex = "0.4.2"
 
 [[bin]]
 name = "client"

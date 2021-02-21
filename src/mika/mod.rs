@@ -24,7 +24,7 @@ impl TCPRelay {
     }
 
     // serve handles connection between socks5 client and remote addr.
-    pub async fn serve(self, conn: TcpStream, secret_key: &[u8; 32]) {
+    pub async fn serve(self, conn: TcpStream, secret_key: &Vec<u8>) {
         let (mut cr, mut cw) = conn.into_split();
         let mut client_reader = CryptoReader::new(&mut cr, &secret_key);
 
@@ -41,7 +41,6 @@ impl TCPRelay {
             println!("io copy failed {}", e);
             return;
         }
-        println!("serve stopped");
     }
 
     async fn new_conn(addr: address::Address) -> TcpStream {

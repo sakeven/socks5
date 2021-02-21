@@ -1,3 +1,4 @@
+use super::hkdf;
 use aes_gcm::aead::{generic_array::GenericArray, AeadInPlace, NewAead};
 use aes_gcm::Aes128Gcm;
 
@@ -13,13 +14,35 @@ pub struct Aes128Gcm0 {
 }
 
 impl Aes128Gcm0 {
-    pub fn new(secret_key: &[u8; 32]) -> Aes128Gcm0 {
-        let key = GenericArray::from_slice(&secret_key[..16]);
+    pub fn new(secret_key: &[u8]) -> Aes128Gcm0 {
+        let mut salt = [0; SALT_SIZE];
+        random_iv_or_salt(&mut salt[..]);
+
+        let mut okm = [0u8; 64];
+        hkdf::HkdfSha1::oneshot(&salt, secret_key, b"ss-subkey", &mut okm[..16]);
+        let key = GenericArray::from_slice(&okm[..16]);
         Aes128Gcm0 {
             ase: Aes128Gcm::new(key),
             nonce: Box::new([0u8; 12]),
             buf: Vec::with_capacity(2048),
-            salt: [0; SALT_SIZE],
+            salt: salt,
+        }
+    }
+}
+
+/// Generate random bytes into `iv_or_salt`
+pub fn random_iv_or_salt(iv_or_salt: &mut [u8]) {
+    // Gen IV or Gen Salt by KEY-LEN
+    if iv_or_salt.is_empty() {
+        return ();
+    }
+
+    let mut rng = rand::thread_rng();
+    loop {
+        rand::Rng::fill(&mut rng, iv_or_salt);
+        let is_zeros = iv_or_salt.iter().all(|&x| x == 0);
+        if !is_zeros {
+            break;
         }
     }
 }
@@ -45,7 +68,6 @@ impl Encrypto for Aes128Gcm0 {
         self.buf[0] = (orig_len >> 8) as u8;
         self.buf[1] = (orig_len % (1 << 8)) as u8;
 
-        inc(&mut *self.nonce);
         let tag = self
             .ase
             .encrypt_in_place_detached((&(*self.nonce)).into(), b"", &mut self.buf[0..2])
@@ -63,6 +85,8 @@ impl Encrypto for Aes128Gcm0 {
         let tagslice = tag.as_slice();
         assert_eq!(tagslice.len(), TAG_SIZE);
         self.buf.extend_from_slice(tagslice);
+        inc(&mut *self.nonce);
+
         &self.buf
     }
 }
@@ -75,20 +99,21 @@ enum DecrytState {
 }
 
 pub struct Aes128Gcm0Decrypto {
-    ase: Aes128Gcm,
+    ase: Option<Aes128Gcm>,
     nonce: Box<[u8]>,
-    salt: [u8; SALT_SIZE],
+    secret_key: [u8; 16],
     datalen: usize,
     state: DecrytState,
 }
 
 impl Aes128Gcm0Decrypto {
-    pub fn new(secret_key: &[u8; 32]) -> Aes128Gcm0Decrypto {
-        let key = GenericArray::from_slice(&secret_key[..16]);
+    pub fn new(secret_key: &[u8]) -> Aes128Gcm0Decrypto {
+        let mut sk = [0u8; 16];
+        sk.copy_from_slice(&secret_key[..16]);
         Aes128Gcm0Decrypto {
-            ase: Aes128Gcm::new(key),
+            ase: None,
             nonce: Box::new([0u8; 12]),
-            salt: [0u8; SALT_SIZE],
+            secret_key: sk,
             datalen: 0,
             state: DecrytState::Salt,
         }
@@ -99,27 +124,35 @@ impl Decrypto for Aes128Gcm0Decrypto {
     fn decrypt(&mut self, plaintext: &mut [u8]) -> usize {
         match self.state {
             DecrytState::Salt => {
-                self.salt.clone_from_slice(plaintext);
+                let mut salt = [0u8; SALT_SIZE];
+                salt.clone_from_slice(plaintext);
                 self.state = DecrytState::DataLen;
+                let mut okm = [0u8; 64];
+                hkdf::HkdfSha1::oneshot(&salt, &self.secret_key, b"ss-subkey", &mut okm[..16]);
+                let key = GenericArray::from_slice(&okm[..16]);
+                self.ase = Some(Aes128Gcm::new(key))
             }
             DecrytState::DataLen => {
-                inc(&mut self.nonce);
                 let mut buf: Vec<u8> = Vec::new();
                 buf.extend_from_slice(plaintext);
                 self.ase
+                    .as_ref()
+                    .unwrap()
                     .decrypt_in_place((&(*self.nonce)).into(), b"", &mut buf)
                     .unwrap();
-
+                inc(&mut self.nonce);
                 self.datalen = ((buf[0] as usize) << 8) + (buf[1] as usize);
                 self.state = DecrytState::Data;
             }
             DecrytState::Data => {
-                inc(&mut self.nonce);
                 let mut buf: Vec<u8> = Vec::new();
                 buf.extend_from_slice(plaintext);
                 self.ase
+                    .as_ref()
+                    .unwrap()
                     .decrypt_in_place((&(*self.nonce)).into(), b"", &mut buf)
                     .unwrap();
+                inc(&mut self.nonce);
                 let len = plaintext.len() - TAG_SIZE;
                 plaintext[..len].copy_from_slice(&buf[..len]);
                 self.state = DecrytState::Empty;
