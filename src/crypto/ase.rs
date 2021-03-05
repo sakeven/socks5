@@ -16,10 +16,10 @@ pub struct Aes128Gcm0 {
 impl Aes128Gcm0 {
     pub fn new(secret_key: &[u8]) -> Aes128Gcm0 {
         let mut salt = [0; SALT_SIZE];
-        random_iv_or_salt(&mut salt[..]);
+        random_salt(&mut salt[..]);
 
         let mut okm = [0u8; 64];
-        hkdf::HkdfSha1::oneshot(&salt, secret_key, b"ss-subkey", &mut okm[..16]);
+        hkdf::HkdfSha1::oneshot(&salt, secret_key, HKDF_INFO, &mut okm[..16]);
         let key = GenericArray::from_slice(&okm[..16]);
         Aes128Gcm0 {
             ase: Aes128Gcm::new(key),
@@ -30,17 +30,16 @@ impl Aes128Gcm0 {
     }
 }
 
-/// Generate random bytes into `iv_or_salt`
-pub fn random_iv_or_salt(iv_or_salt: &mut [u8]) {
-    // Gen IV or Gen Salt by KEY-LEN
-    if iv_or_salt.is_empty() {
+/// Generate random bytes into `salt`
+pub fn random_salt(salt: &mut [u8]) {
+    if salt.is_empty() {
         return ();
     }
 
     let mut rng = rand::thread_rng();
     loop {
-        rand::Rng::fill(&mut rng, iv_or_salt);
-        let is_zeros = iv_or_salt.iter().all(|&x| x == 0);
+        rand::Rng::fill(&mut rng, salt);
+        let is_zeros = salt.iter().all(|&x| x == 0);
         if !is_zeros {
             break;
         }
@@ -120,6 +119,8 @@ impl Aes128Gcm0Decrypto {
     }
 }
 
+const HKDF_INFO: &[u8; 9] = b"ss-subkey";
+
 impl Decrypto for Aes128Gcm0Decrypto {
     fn decrypt(&mut self, plaintext: &mut [u8]) -> usize {
         match self.state {
@@ -128,13 +129,12 @@ impl Decrypto for Aes128Gcm0Decrypto {
                 salt.clone_from_slice(plaintext);
                 self.state = DecrytState::DataLen;
                 let mut okm = [0u8; 64];
-                hkdf::HkdfSha1::oneshot(&salt, &self.secret_key, b"ss-subkey", &mut okm[..16]);
+                hkdf::HkdfSha1::oneshot(&salt, &self.secret_key, HKDF_INFO, &mut okm[..16]);
                 let key = GenericArray::from_slice(&okm[..16]);
                 self.ase = Some(Aes128Gcm::new(key))
             }
             DecrytState::DataLen => {
-                let mut buf: Vec<u8> = Vec::new();
-                buf.extend_from_slice(plaintext);
+                let mut buf: Vec<u8> = plaintext.to_vec();
                 self.ase
                     .as_ref()
                     .unwrap()

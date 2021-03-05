@@ -74,10 +74,12 @@ where
 {
     crypto: Box<dyn interface::Decrypto + Send>,
     reader: T,
-    buf: [u8; 8192 * 3],
+    buf: [u8; MAX_BUF_LEN],
     size: usize,
     pos: usize,
 }
+
+const MAX_BUF_LEN: usize = (1 << 16) - 1;
 
 impl<T> CryptoReader<T>
 where
@@ -90,14 +92,14 @@ where
         CryptoReader {
             crypto: crypto,
             reader: reader,
-            buf: [0; 8192 * 3],
+            buf: [0; MAX_BUF_LEN],
             size: 0,
             pos: 0,
         }
     }
 
     fn poll_read_exact(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
-        let mut read_buf = ReadBuf::new(&mut self.buf[..size]);
+        let mut read_buf = ReadBuf::new(&mut self.buf[self.pos..self.pos + size]);
         while self.size < size {
             let last = self.size;
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf))?;
@@ -120,6 +122,7 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = Pin::into_inner(self);
+
         if this.size > 0 {
             let len = usize::min(buf.remaining(), this.buf[this.pos..this.size].len());
             buf.put_slice(&(this.buf[this.pos..this.pos + len]));
@@ -130,18 +133,12 @@ where
             }
             return Ok(()).into();
         }
+
         loop {
             let size = this.crypto.next_size();
-            if size <= -1 {
-                this.size = 0;
-                ready!(Pin::new(&mut this.reader).poll_read(cx, buf))?;
-                let bbuf = buf.filled_mut();
-                this.crypto.decrypt(bbuf);
-                return Ok(()).into();
-            } else if size == 0 {
+            if size == 0 {
                 let len = usize::min(buf.remaining(), this.buf[this.pos..this.size].len());
                 buf.put_slice(&(this.buf[this.pos..this.pos + len]));
-
                 this.pos += len;
                 if this.pos == this.size {
                     this.size = 0;
@@ -149,10 +146,9 @@ where
                 }
                 return Ok(()).into();
             } else {
-                this.size = 0;
                 let vsize = size as usize;
                 ready!(this.poll_read_exact(cx, vsize))?;
-                this.size = this.crypto.decrypt(&mut this.buf[..this.size]);
+                this.size = this.crypto.decrypt(&mut this.buf[..vsize]);
             }
         }
     }

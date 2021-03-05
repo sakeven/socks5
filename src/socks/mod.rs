@@ -7,6 +7,7 @@ use tokio::net::TcpStream;
 
 use crate::address;
 use crate::crypto::{CryptoReader, CryptoWriter};
+use crate::obfs::{ObfsReader, ObfsWriter};
 
 const SOCKSV5: u8 = 0x05;
 const DEBUG: bool = false;
@@ -192,12 +193,14 @@ impl TCPRelay {
     async fn connect(self, conn: TcpStream, addr: Vec<u8>, secret_key: &Vec<u8>) {
         let server = TcpStream::connect(self.ss_server).await.unwrap();
         let (mut cr, mut cw) = conn.into_split();
-        let (mut rr, mut rw) = server.into_split();
-        let mut server_writer = CryptoWriter::new(&mut rw, secret_key);
+        let (rr, rw) = server.into_split();
+        let mut obfs_writer = ObfsWriter::new(rw);
+        let mut obfs_reader = ObfsReader::new(rr);
+        let mut server_writer = CryptoWriter::new(&mut obfs_writer, secret_key);
         let sk = secret_key.clone();
         server_writer.write(addr.as_slice()).await.unwrap();
         tokio::spawn(async move {
-            let mut server_reader = CryptoReader::new(&mut rr, &sk);
+            let mut server_reader = CryptoReader::new(&mut obfs_reader, &sk);
             io::copy(&mut server_reader, &mut cw).await
         });
         if let Err(e) = io::copy(&mut cr, &mut server_writer).await {
