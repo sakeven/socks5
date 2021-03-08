@@ -1,4 +1,4 @@
-mod ase;
+mod aes;
 mod hkdf;
 mod interface;
 
@@ -28,10 +28,10 @@ where
 {
     pub fn new(writer: T, secret_key: &[u8]) -> CryptoWriter<T> {
         let crypto: Box<dyn interface::Encrypto + Send> =
-            Box::new(ase::Aes128Gcm0::new(secret_key));
+            Box::new(aes::Aes128Gcm0::new(secret_key));
         CryptoWriter {
-            crypto: crypto,
-            writer: writer,
+            crypto,
+            writer,
             inited: false,
         }
     }
@@ -70,11 +70,11 @@ where
 
 pub struct CryptoReader<T>
 where
-    T: io::AsyncReadExt + std::marker::Unpin,
+    T: io::AsyncRead + std::marker::Unpin,
 {
     crypto: Box<dyn interface::Decrypto + Send>,
     reader: T,
-    buf: [u8; MAX_BUF_LEN],
+    buf: Vec<u8>,
     size: usize,
     pos: usize,
 }
@@ -83,28 +83,36 @@ const MAX_BUF_LEN: usize = (1 << 16) - 1;
 
 impl<T> CryptoReader<T>
 where
-    T: io::AsyncReadExt + std::marker::Unpin,
+    T: io::AsyncRead + std::marker::Unpin,
 {
     pub fn new(reader: T, secret_key: &[u8]) -> CryptoReader<T> {
         let crypto: Box<dyn interface::Decrypto + Send> =
-            Box::new(ase::Aes128Gcm0Decrypto::new(secret_key));
+            Box::new(aes::Aes128Gcm0Decrypto::new(secret_key));
 
         CryptoReader {
-            crypto: crypto,
-            reader: reader,
-            buf: [0; MAX_BUF_LEN],
+            crypto,
+            reader,
+            buf: Vec::with_capacity(MAX_BUF_LEN),
             size: 0,
             pos: 0,
         }
     }
 
-    fn poll_read_exact(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
-        let mut read_buf = ReadBuf::new(&mut self.buf[self.pos..self.pos + size]);
+    fn poll_read_exact0(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
+        assert_eq!(self.pos, 0);
+        assert_eq!(self.size, 0);
+        assert_ne!(size, 0);
+        unsafe {
+            self.buf.set_len(size);
+            self.buf.fill(0);
+        }
+        let mut read_buf = ReadBuf::new(&mut self.buf);
         while self.size < size {
             let last = self.size;
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf))?;
             self.size = read_buf.filled().len();
-            if self.size == last || self.size == 0 {
+            if self.size == last {
+                println!("eof");
                 return Err(ErrorKind::UnexpectedEof.into()).into();
             }
         }
@@ -114,60 +122,57 @@ where
 
 impl<T> io::AsyncRead for CryptoReader<T>
 where
-    T: io::AsyncReadExt + std::marker::Unpin,
+    T: io::AsyncRead + std::marker::Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        rbuf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = Pin::into_inner(self);
-
-        if this.size > 0 {
-            let len = usize::min(buf.remaining(), this.buf[this.pos..this.size].len());
-            buf.put_slice(&(this.buf[this.pos..this.pos + len]));
+        if this.pos < this.size {
+            let len = usize::min(rbuf.remaining(), this.buf[this.pos..this.size].len());
+            rbuf.put_slice(&(this.buf[this.pos..this.pos + len]));
             this.pos += len;
-            if this.pos == this.size {
-                this.size = 0;
-                this.pos = 0;
-            }
             return Ok(()).into();
         }
+        this.size = 0;
+        this.pos = 0;
 
         loop {
             let size = this.crypto.next_size();
             if size == 0 {
-                let len = usize::min(buf.remaining(), this.buf[this.pos..this.size].len());
-                buf.put_slice(&(this.buf[this.pos..this.pos + len]));
+                let len = usize::min(rbuf.remaining(), this.buf[this.pos..this.size].len());
+                rbuf.put_slice(&(this.buf[this.pos..this.pos + len]));
                 this.pos += len;
-                if this.pos == this.size {
-                    this.size = 0;
-                    this.pos = 0;
-                }
                 return Ok(()).into();
             } else {
-                let vsize = size as usize;
-                ready!(this.poll_read_exact(cx, vsize))?;
-                this.size = this.crypto.decrypt(&mut this.buf[..vsize]);
+                ready!(this.poll_read_exact0(cx, size))?;
+                println!("size {} {}", size, this.size);
+                assert_eq!(size, this.size);
+                if this.size == 0 {
+                    return Ok(()).into();
+                }
+                this.size = this.crypto.decrypt(&mut this.buf);
             }
         }
     }
 }
 
-const MD5_SZIE: usize = 16;
+const MD5_SIZE: usize = 16;
 
 pub fn evp_bytes_to_key(password: String, keylen: usize) -> Vec<u8> {
     let mut md5 = Md5::new();
-    let cnt = (keylen - 1) / MD5_SZIE + 1;
+    let cnt = (keylen - 1) / MD5_SIZE + 1;
     md5.input(&password.as_bytes());
-    let mut ms = vec![0u8; cnt * MD5_SZIE];
+    let mut ms = vec![0u8; cnt * MD5_SIZE];
     md5.result(&mut ms[..]);
 
-    let mut data = vec![0u8; MD5_SZIE + password.len()];
+    let mut data = vec![0u8; MD5_SIZE + password.len()];
     for i in 1..cnt {
         let pos = i << 4;
-        data[..MD5_SZIE].copy_from_slice(&ms[((i - 1) << 4)..pos]);
-        data[MD5_SZIE..MD5_SZIE + password.len()].copy_from_slice(&password.as_bytes());
+        data[..MD5_SIZE].copy_from_slice(&ms[((i - 1) << 4)..pos]);
+        data[MD5_SIZE..MD5_SIZE + password.len()].copy_from_slice(&password.as_bytes());
         md5.reset();
         md5.input(&data);
         md5.result(&mut ms[pos..]);

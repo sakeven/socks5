@@ -3,12 +3,14 @@ use aes_gcm::aead::{generic_array::GenericArray, AeadInPlace, NewAead};
 use aes_gcm::Aes128Gcm;
 
 use super::interface::{Decrypto, Encrypto};
+use std::thread::sleep;
+use std::time::Duration;
 
 const SALT_SIZE: usize = 16;
 
 pub struct Aes128Gcm0 {
     ase: Aes128Gcm,
-    nonce: Box<[u8]>,
+    nonce: [u8; 12],
     buf: Vec<u8>,
     salt: [u8; SALT_SIZE],
 }
@@ -23,7 +25,7 @@ impl Aes128Gcm0 {
         let key = GenericArray::from_slice(&okm[..16]);
         Aes128Gcm0 {
             ase: Aes128Gcm::new(key),
-            nonce: Box::new([0u8; 12]),
+            nonce: [0u8; 12],
             buf: Vec::with_capacity(2048),
             salt: salt,
         }
@@ -69,28 +71,28 @@ impl Encrypto for Aes128Gcm0 {
 
         let tag = self
             .ase
-            .encrypt_in_place_detached((&(*self.nonce)).into(), b"", &mut self.buf[0..2])
+            .encrypt_in_place_detached((&self.nonce).into(), b"", &mut self.buf[0..2])
             .unwrap();
         let tagslice = tag.as_slice();
         assert_eq!(tagslice.len(), TAG_SIZE);
         let length_tag_idx = 2 + tagslice.len();
         self.buf[2..length_tag_idx].clone_from_slice(tagslice);
 
-        inc(&mut *self.nonce);
+        inc(&mut self.nonce);
         let tag = self
             .ase
-            .encrypt_in_place_detached((&(*self.nonce)).into(), b"", &mut self.buf[2 + tag.len()..])
+            .encrypt_in_place_detached((&self.nonce).into(), b"", &mut self.buf[2 + tag.len()..])
             .unwrap();
         let tagslice = tag.as_slice();
         assert_eq!(tagslice.len(), TAG_SIZE);
         self.buf.extend_from_slice(tagslice);
-        inc(&mut *self.nonce);
+        inc(&mut self.nonce);
 
         &self.buf
     }
 }
 
-enum DecrytState {
+enum DecryptState {
     Salt,
     DataLen,
     Data,
@@ -99,10 +101,10 @@ enum DecrytState {
 
 pub struct Aes128Gcm0Decrypto {
     ase: Option<Aes128Gcm>,
-    nonce: Box<[u8]>,
+    nonce: [u8; 12],
     secret_key: [u8; 16],
     datalen: usize,
-    state: DecrytState,
+    state: DecryptState,
 }
 
 impl Aes128Gcm0Decrypto {
@@ -111,10 +113,10 @@ impl Aes128Gcm0Decrypto {
         sk.copy_from_slice(&secret_key[..16]);
         Aes128Gcm0Decrypto {
             ase: None,
-            nonce: Box::new([0u8; 12]),
+            nonce: [0u8; 12],
             secret_key: sk,
             datalen: 0,
-            state: DecrytState::Salt,
+            state: DecryptState::Salt,
         }
     }
 }
@@ -122,54 +124,60 @@ impl Aes128Gcm0Decrypto {
 const HKDF_INFO: &[u8; 9] = b"ss-subkey";
 
 impl Decrypto for Aes128Gcm0Decrypto {
-    fn decrypt(&mut self, plaintext: &mut [u8]) -> usize {
+    fn decrypt(&mut self, plaintext: &mut Vec<u8>) -> usize {
         match self.state {
-            DecrytState::Salt => {
+            DecryptState::Salt => {
                 let mut salt = [0u8; SALT_SIZE];
                 salt.clone_from_slice(plaintext);
-                self.state = DecrytState::DataLen;
+                self.state = DecryptState::DataLen;
                 let mut okm = [0u8; 64];
                 hkdf::HkdfSha1::oneshot(&salt, &self.secret_key, HKDF_INFO, &mut okm[..16]);
                 let key = GenericArray::from_slice(&okm[..16]);
                 self.ase = Some(Aes128Gcm::new(key))
             }
-            DecrytState::DataLen => {
-                let mut buf: Vec<u8> = plaintext.to_vec();
+            DecryptState::DataLen => {
+                println!("datalen");
+                assert_eq!(plaintext.len(), TAG_SIZE + 2);
+                self.datalen = 0;
                 self.ase
                     .as_ref()
                     .unwrap()
-                    .decrypt_in_place((&(*self.nonce)).into(), b"", &mut buf)
+                    .decrypt_in_place((&self.nonce).into(), b"", plaintext)
                     .unwrap();
                 inc(&mut self.nonce);
-                self.datalen = ((buf[0] as usize) << 8) + (buf[1] as usize);
-                self.state = DecrytState::Data;
+                self.datalen = ((plaintext[0] as usize) << 8) + (plaintext[1] as usize);
+                self.state = DecryptState::Data;
             }
-            DecrytState::Data => {
-                let mut buf: Vec<u8> = Vec::new();
-                buf.extend_from_slice(plaintext);
+            DecryptState::Data => {
+                /*
+                 * don't known why need sleep. the process will panic at decrypt_in_place if removed this line.
+                 */
+                // if plaintext.len() < 16399 {
+                sleep(Duration::from_millis(50));
+                // }
+                println!("data");
+                assert_eq!(self.datalen + TAG_SIZE, plaintext.len());
                 self.ase
                     .as_ref()
                     .unwrap()
-                    .decrypt_in_place((&(*self.nonce)).into(), b"", &mut buf)
+                    .decrypt_in_place((&self.nonce).into(), b"", plaintext)
                     .unwrap();
                 inc(&mut self.nonce);
-                let len = plaintext.len() - TAG_SIZE;
-                plaintext[..len].copy_from_slice(&buf[..len]);
-                self.state = DecrytState::Empty;
-                return len;
+                self.state = DecryptState::Empty;
+                return self.datalen;
             }
-            DecrytState::Empty => {}
+            DecryptState::Empty => {}
         }
         return 0;
     }
 
-    fn next_size(&mut self) -> i32 {
+    fn next_size(&mut self) -> usize {
         match self.state {
-            DecrytState::Salt => SALT_SIZE as i32,
-            DecrytState::DataLen => 2 + TAG_SIZE as i32,
-            DecrytState::Data => (self.datalen + TAG_SIZE) as i32,
-            DecrytState::Empty => {
-                self.state = DecrytState::DataLen;
+            DecryptState::Salt => SALT_SIZE,
+            DecryptState::DataLen => 2 + TAG_SIZE,
+            DecryptState::Data => (self.datalen + TAG_SIZE),
+            DecryptState::Empty => {
+                self.state = DecryptState::DataLen;
                 0
             }
         }
@@ -178,7 +186,7 @@ impl Decrypto for Aes128Gcm0Decrypto {
 
 fn inc(nonce: &mut [u8]) {
     for i in &mut *nonce {
-        *i = ((*i as i32 + 1) % 256) as u8;
+        *i = ((*i as u16 + 1) % 256) as u8;
         if *i != 0 {
             return;
         }

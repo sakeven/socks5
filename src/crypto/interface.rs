@@ -4,6 +4,6 @@ pub trait Encrypto {
 }
 
 pub trait Decrypto {
-    fn decrypt(&mut self, chiper: &mut [u8]) -> usize;
-    fn next_size(&mut self) -> i32;
+    fn decrypt(&mut self, chiper: &mut Vec<u8>) -> usize;
+    fn next_size(&mut self) -> usize;
 }

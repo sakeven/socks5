@@ -2,7 +2,7 @@ use core::pin::Pin;
 use core::task::Context;
 use core::task::Poll;
 use rand::RngCore;
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 use base64;
 use bstr::ByteSlice;
@@ -17,12 +17,9 @@ struct Obfs {
 
 impl Obfs {
     fn new(host: String) -> Self {
-        Obfs {
-            init: false,
-            host: host,
-        }
+        Obfs { init: false, host }
     }
-    fn obfs_http_request(&mut self) -> String {
+    fn obfs_http_request(&mut self, len: usize) -> String {
         if self.init {
             return "".to_string();
         }
@@ -45,10 +42,11 @@ impl Obfs {
         let b64_url = base64::encode_config(key, base64::URL_SAFE);
 
         str += &format!("Sec-WebSocket-Key: {}\r\n", b64_url);
-        str += &format!("Content-Length: {}\r\n\r\n", 15);
+        str += &format!("Content-Length: {}\r\n\r\n", len);
         return str.to_string();
     }
 
+    #[allow(dead_code)]
     fn obfs_http_response(&mut self) -> String {
         if self.init {
             return "".to_string();
@@ -100,9 +98,8 @@ where
         let this = Pin::into_inner(self);
 
         if !this.inited {
-            ready!(
-                Pin::new(&mut this.writer).poll_write(cx, this.obfs.obfs_http_request().as_bytes())
-            )?;
+            ready!(Pin::new(&mut this.writer)
+                .poll_write(cx, this.obfs.obfs_http_request(buf.len()).as_bytes()))?;
             this.inited = true;
         }
 
@@ -121,7 +118,7 @@ where
 
 pub struct ObfsReader<T>
 where
-    T: io::AsyncReadExt + std::marker::Unpin,
+    T: io::AsyncRead + std::marker::Unpin,
 {
     reader: T,
     buf: [u8; MAX_BUF_LEN],
@@ -130,11 +127,11 @@ where
     inited: bool,
 }
 
-const MAX_BUF_LEN: usize = 256 * 2;
+const MAX_BUF_LEN: usize = 256;
 
 impl<T> ObfsReader<T>
 where
-    T: io::AsyncReadExt + std::marker::Unpin,
+    T: io::AsyncRead + std::marker::Unpin,
 {
     pub fn new(reader: T) -> ObfsReader<T> {
         ObfsReader {
@@ -146,14 +143,15 @@ where
         }
     }
 
-    fn poll_read_exact(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
-        let mut read_buf = ReadBuf::new(&mut self.buf[self.pos..self.pos + size]);
-        while self.size < size {
-            let last = self.size;
+    fn poll_read_http_response(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let mut read_buf = ReadBuf::new(&mut self.buf);
+        loop {
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf))?;
-            self.size = read_buf.filled().len();
-            if self.size == last || self.size == 0 {
-                return Err(ErrorKind::UnexpectedEof.into()).into();
+            let idx = read_buf.filled().find("\r\n\r\n");
+            if idx.is_some() {
+                self.pos = idx.unwrap() + 4;
+                self.size = read_buf.filled().len();
+                break;
             }
         }
         return Ok(()).into();
@@ -162,7 +160,7 @@ where
 
 impl<T> io::AsyncRead for ObfsReader<T>
 where
-    T: io::AsyncReadExt + std::marker::Unpin,
+    T: io::AsyncRead + std::marker::Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -172,34 +170,17 @@ where
         let this = Pin::into_inner(self);
 
         if !this.inited {
-            ready!(this.poll_read_exact(cx, MAX_BUF_LEN))?;
-            let idx = this.buf.find("\r\n\r\n").unwrap();
-            this.pos = idx + 4;
-
-            let len = usize::min(buf.remaining(), this.buf[this.pos..this.size].len());
-            buf.put_slice(&(this.buf[this.pos..this.pos + len]));
-            this.pos += len;
-            if this.pos == this.size {
-                this.size = 0;
-                this.pos = 0;
-            }
-
+            ready!(this.poll_read_http_response(cx))?;
             this.inited = true;
-            return Ok(()).into();
         }
 
-        if this.pos > 0 {
+        if this.pos < this.size {
             let len = usize::min(buf.remaining(), this.buf[this.pos..this.size].len());
             buf.put_slice(&(this.buf[this.pos..this.pos + len]));
             this.pos += len;
-            if this.pos == this.size {
-                this.size = 0;
-                this.pos = 0;
-            }
             return Ok(()).into();
         }
 
-        ready!(Pin::new(&mut this.reader).poll_read(cx, buf))?;
-        Ok(()).into()
+        Pin::new(&mut this.reader).poll_read(cx, buf)
     }
 }

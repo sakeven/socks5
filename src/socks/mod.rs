@@ -125,7 +125,7 @@ impl TCPRelay {
         match cmd {
             CONNECT | BIND | UDP_ASSOCIATE => {}
             _ => {
-                println!("unknow cmd type");
+                println!("unknown cmd type");
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     "unsupported address type",
@@ -136,7 +136,6 @@ impl TCPRelay {
         // RSV
         let _ = conn.read_u8().await.unwrap();
 
-        // let addr = address::get_raw_address(Pin::new(conn)).await.unwrap();
         let addr = address::get_raw_address(conn).await.unwrap();
         if DEBUG {
             println!("{:?}", addr);
@@ -194,18 +193,25 @@ impl TCPRelay {
         let server = TcpStream::connect(self.ss_server).await.unwrap();
         let (mut cr, mut cw) = conn.into_split();
         let (rr, rw) = server.into_split();
+        println!("connected");
+
         let mut obfs_writer = ObfsWriter::new(rw);
         let mut obfs_reader = ObfsReader::new(rr);
         let mut server_writer = CryptoWriter::new(&mut obfs_writer, secret_key);
-        let sk = secret_key.clone();
         server_writer.write(addr.as_slice()).await.unwrap();
+
+        let sk = secret_key.clone();
         tokio::spawn(async move {
             let mut server_reader = CryptoReader::new(&mut obfs_reader, &sk);
-            io::copy(&mut server_reader, &mut cw).await
+            if let Err(e) = io::copy(&mut server_reader, &mut cw).await {
+                println!("io remote copy failed {}", e);
+            }
         });
+
         if let Err(e) = io::copy(&mut cr, &mut server_writer).await {
-            println!("io copy failed {}", e);
+            println!("io client copy failed {}", e);
         }
+        println!("connect end")
     }
 
     // udp_associate handles UDP_ASSOCIATE cmd

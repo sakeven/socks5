@@ -11,7 +11,7 @@ async fn handle(stream: TcpStream, server: String, secret_key: &Vec<u8>) {
     socks5s.serve(stream, secret_key).await;
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 10)]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = Arc::new(config::parse_conf()?);
 
@@ -22,6 +22,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let key = crypto::evp_bytes_to_key(cfg.server[0].password.clone(), 16);
     let secret_key = Arc::new(key);
+
     loop {
         let (stream, _) = match listen.accept().await {
             Ok(a) => a,

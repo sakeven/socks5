@@ -5,8 +5,7 @@ authors = ["sakeven <sakeven.jiang@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-chacha = "0.3.0"
+tokio = { version = "1.2.0", features = ["full"] }
 rand = "0.8.2"
 serde_yaml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
