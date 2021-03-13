@@ -3,8 +3,6 @@ use aes_gcm::aead::{generic_array::GenericArray, AeadInPlace, NewAead};
 use aes_gcm::Aes128Gcm;
 
 use super::interface::{Decrypto, Encrypto};
-use std::thread::sleep;
-use std::time::Duration;
 
 const SALT_SIZE: usize = 16;
 
@@ -13,6 +11,7 @@ pub struct Aes128Gcm0 {
     nonce: [u8; 12],
     buf: Vec<u8>,
     salt: [u8; SALT_SIZE],
+    wait_consume: bool,
 }
 
 impl Aes128Gcm0 {
@@ -27,7 +26,8 @@ impl Aes128Gcm0 {
             ase: Aes128Gcm::new(key),
             nonce: [0u8; 12],
             buf: Vec::with_capacity(2048),
-            salt: salt,
+            salt,
+            wait_consume: false,
         }
     }
 }
@@ -52,12 +52,23 @@ const TAG_SIZE: usize = 16;
 
 impl Encrypto for Aes128Gcm0 {
     fn encrypt_init(&mut self) -> &Vec<u8> {
+        if self.wait_consume {
+            return &self.buf;
+        }
         self.buf.clear();
         self.buf.extend_from_slice(&self.salt[..]);
+        self.wait_consume = true;
         &self.buf
+    }
+    fn reset(&mut self) {
+        self.wait_consume = false;
     }
 
     fn encrypt(&mut self, plaintext: &[u8]) -> &Vec<u8> {
+        if self.wait_consume {
+            return &self.buf;
+        }
+
         unsafe {
             self.buf.set_len(2 + TAG_SIZE);
         }
@@ -88,10 +99,12 @@ impl Encrypto for Aes128Gcm0 {
         self.buf.extend_from_slice(tagslice);
         inc(&mut self.nonce);
 
+        self.wait_consume = true;
         &self.buf
     }
 }
 
+#[derive(Debug)]
 enum DecryptState {
     Salt,
     DataLen,
@@ -129,14 +142,13 @@ impl Decrypto for Aes128Gcm0Decrypto {
             DecryptState::Salt => {
                 let mut salt = [0u8; SALT_SIZE];
                 salt.clone_from_slice(plaintext);
-                self.state = DecryptState::DataLen;
                 let mut okm = [0u8; 64];
                 hkdf::HkdfSha1::oneshot(&salt, &self.secret_key, HKDF_INFO, &mut okm[..16]);
                 let key = GenericArray::from_slice(&okm[..16]);
-                self.ase = Some(Aes128Gcm::new(key))
+                self.ase = Some(Aes128Gcm::new(key));
+                self.state = DecryptState::DataLen;
             }
             DecryptState::DataLen => {
-                println!("datalen");
                 assert_eq!(plaintext.len(), TAG_SIZE + 2);
                 self.datalen = 0;
                 self.ase
@@ -149,13 +161,6 @@ impl Decrypto for Aes128Gcm0Decrypto {
                 self.state = DecryptState::Data;
             }
             DecryptState::Data => {
-                /*
-                 * don't known why need sleep. the process will panic at decrypt_in_place if removed this line.
-                 */
-                // if plaintext.len() < 16399 {
-                sleep(Duration::from_millis(50));
-                // }
-                println!("data");
                 assert_eq!(self.datalen + TAG_SIZE, plaintext.len());
                 self.ase
                     .as_ref()

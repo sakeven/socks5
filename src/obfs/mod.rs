@@ -1,12 +1,12 @@
-use core::pin::Pin;
-use core::task::Context;
-use core::task::Poll;
-use rand::RngCore;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 use base64;
 use bstr::ByteSlice;
 use futures::ready;
+use rand::RngCore;
 use tokio::io;
 use tokio::io::ReadBuf;
 
@@ -144,13 +144,17 @@ where
     }
 
     fn poll_read_http_response(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let mut read_buf = ReadBuf::new(&mut self.buf);
         loop {
-            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf))?;
-            let idx = read_buf.filled().find("\r\n\r\n");
+            let last = self.size;
+            let mut read_buf = ReadBuf::new(&mut self.buf[self.size..]);
+            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf)?);
+            self.size += read_buf.filled().len();
+            if self.size == last {
+                return Err(ErrorKind::UnexpectedEof.into()).into();
+            }
+            let idx = self.buf[..self.size].find("\r\n\r\n");
             if idx.is_some() {
                 self.pos = idx.unwrap() + 4;
-                self.size = read_buf.filled().len();
                 break;
             }
         }

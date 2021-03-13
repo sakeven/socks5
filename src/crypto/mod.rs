@@ -2,10 +2,10 @@ mod aes;
 mod hkdf;
 mod interface;
 
-use core::pin::Pin;
-use core::task::Context;
-use core::task::Poll;
 use std::io::{Error, ErrorKind};
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 use crypto::digest::Digest;
 use crypto::md5::Md5;
@@ -51,11 +51,13 @@ where
         if !this.inited {
             let data = this.crypto.encrypt_init();
             ready!(Pin::new(&mut this.writer).poll_write(cx, data))?;
+            this.crypto.reset();
             this.inited = true;
         }
 
         let data = this.crypto.encrypt(buf);
         ready!(Pin::new(&mut this.writer).poll_write(cx, data))?;
+        this.crypto.reset();
         Ok(buf.len()).into()
     }
 
@@ -77,6 +79,7 @@ where
     buf: Vec<u8>,
     size: usize,
     pos: usize,
+    buf_need_ret: bool,
 }
 
 const MAX_BUF_LEN: usize = (1 << 16) - 1;
@@ -95,24 +98,22 @@ where
             buf: Vec::with_capacity(MAX_BUF_LEN),
             size: 0,
             pos: 0,
+            buf_need_ret: false,
         }
     }
 
     fn poll_read_exact0(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
         assert_eq!(self.pos, 0);
-        assert_eq!(self.size, 0);
         assert_ne!(size, 0);
         unsafe {
             self.buf.set_len(size);
-            self.buf.fill(0);
         }
-        let mut read_buf = ReadBuf::new(&mut self.buf);
         while self.size < size {
             let last = self.size;
-            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf))?;
-            self.size = read_buf.filled().len();
+            let mut read_buf = ReadBuf::new(&mut self.buf[self.size..]);
+            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf)?);
+            self.size += read_buf.filled().len();
             if self.size == last {
-                println!("eof");
                 return Err(ErrorKind::UnexpectedEof.into()).into();
             }
         }
@@ -130,14 +131,17 @@ where
         rbuf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = Pin::into_inner(self);
-        if this.pos < this.size {
-            let len = usize::min(rbuf.remaining(), this.buf[this.pos..this.size].len());
-            rbuf.put_slice(&(this.buf[this.pos..this.pos + len]));
-            this.pos += len;
-            return Ok(()).into();
+
+        if this.buf_need_ret {
+            if this.pos < this.size {
+                let len = usize::min(rbuf.remaining(), this.buf[this.pos..this.size].len());
+                rbuf.put_slice(&(this.buf[this.pos..this.pos + len]));
+                this.pos += len;
+                return Ok(()).into();
+            }
+            this.size = 0;
+            this.pos = 0;
         }
-        this.size = 0;
-        this.pos = 0;
 
         loop {
             let size = this.crypto.next_size();
@@ -145,14 +149,12 @@ where
                 let len = usize::min(rbuf.remaining(), this.buf[this.pos..this.size].len());
                 rbuf.put_slice(&(this.buf[this.pos..this.pos + len]));
                 this.pos += len;
+                this.buf_need_ret = true;
                 return Ok(()).into();
             } else {
-                ready!(this.poll_read_exact0(cx, size))?;
-                println!("size {} {}", size, this.size);
+                this.buf_need_ret = false;
+                ready!(this.poll_read_exact0(cx, size)?);
                 assert_eq!(size, this.size);
-                if this.size == 0 {
-                    return Ok(()).into();
-                }
                 this.size = this.crypto.decrypt(&mut this.buf);
             }
         }
