@@ -14,7 +14,7 @@ async fn handle(stream: TcpStream, secret_key: &Vec<u8>) {
 
 #[tokio::main]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = App::new("Mika client")
+    let matches = App::new("Mika server")
         .version("1.0")
         .author("Sake")
         .about("Network Proxy")

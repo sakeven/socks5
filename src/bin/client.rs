@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use clap::{App, Arg};
+use log::{error, info};
+use pretty_env_logger;
 use tokio::net::{TcpListener, TcpStream};
 
 use socks5::config;
@@ -15,6 +17,8 @@ async fn handle(stream: TcpStream, server: String, secret_key: &Server) {
 
 #[tokio::main(worker_threads = 10)]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    pretty_env_logger::init_timed();
+
     let matches = App::new("Mika client")
         .version("1.0")
         .author("Sake")
@@ -39,12 +43,12 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let local = format!("{}:{}", cfg.local[0].address, cfg.local[0].port);
     let listen = TcpListener::bind(&local).await?;
-    println!("Server listens at {}.", local);
+    info!("Server listens at {}.", local);
     loop {
         let (stream, _) = match listen.accept().await {
             Ok(a) => a,
             Err(err) => {
-                println!("{}", err);
+                error!("{}", err);
                 return Ok(());
             }
         };

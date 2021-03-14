@@ -1,7 +1,9 @@
+use std::fmt::{Display, Formatter, Result};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 use std::str;
 use std::vec;
 
+use log::debug;
 use tokio::io;
 use tokio::io::AsyncReadExt;
 
@@ -11,12 +13,24 @@ pub const IPV6_ADDR: u8 = 0x4;
 
 pub const IPV4_LEN: usize = 4;
 pub const IPV6_LEN: usize = 16;
-// pub const PORT_LEN: usize = 2;
 
 #[derive(Debug)]
 pub enum Address {
     SocketAddr(SocketAddr),
     DomainAddr(String, u16),
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            Address::SocketAddr(addr) => {
+                write!(f, "{}", addr)
+            }
+            Address::DomainAddr(host, port) => {
+                write!(f, "{}:{}", host, port)
+            }
+        }
+    }
 }
 
 impl ToSocketAddrs for Address {
@@ -58,7 +72,7 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
         DOMAIN_ADDR => r.read_u8().await.unwrap() as usize,
         IPV6_ADDR => IPV6_LEN,
         _ => {
-            println!("unsupported address type");
+            debug!("unsupported address type");
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "unsupported address type",
@@ -74,7 +88,7 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
     match atyp {
         IPV4_ADDR => {
             let ip = Ipv4Addr::new(raw_addr[0], raw_addr[1], raw_addr[2], raw_addr[3]);
-            println!("{}", ip);
+            debug!("{}", ip);
             Ok(Address::SocketAddr(SocketAddr::V4(SocketAddrV4::new(
                 ip, port,
             ))))
@@ -83,21 +97,21 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
             let host = str::from_utf8(&raw_addr[0..raw_addr_len])
                 .unwrap()
                 .to_string();
-            println!("DOMAIN_ADDR {}", host);
+            debug!("DOMAIN_ADDR {}", host);
             Ok(Address::DomainAddr(host, port))
         }
         IPV6_ADDR => {
             let ip = Ipv6Addr::new(
-                raw_addr[0] as u16 * 256 + raw_addr[1] as u16,
-                raw_addr[2] as u16 * 256 + raw_addr[3] as u16,
-                raw_addr[4] as u16 * 256 + raw_addr[5] as u16,
-                raw_addr[6] as u16 * 256 + raw_addr[7] as u16,
-                raw_addr[8] as u16 * 256 + raw_addr[9] as u16,
-                raw_addr[10] as u16 * 256 + raw_addr[11] as u16,
-                raw_addr[12] as u16 * 256 + raw_addr[13] as u16,
-                raw_addr[14] as u16 * 256 + raw_addr[15] as u16,
+                u16::from_be_bytes([raw_addr[0], raw_addr[1]]),
+                u16::from_be_bytes([raw_addr[2], raw_addr[3]]),
+                u16::from_be_bytes([raw_addr[4], raw_addr[5]]),
+                u16::from_be_bytes([raw_addr[6], raw_addr[7]]),
+                u16::from_be_bytes([raw_addr[8], raw_addr[9]]),
+                u16::from_be_bytes([raw_addr[10], raw_addr[11]]),
+                u16::from_be_bytes([raw_addr[12], raw_addr[13]]),
+                u16::from_be_bytes([raw_addr[14], raw_addr[15]]),
             );
-            println!("Ipv6 {}", ip);
+            debug!("Ipv6 {}", ip);
             Ok(Address::SocketAddr(SocketAddr::V6(SocketAddrV6::new(
                 ip, port, 0, 0,
             ))))
@@ -132,4 +146,54 @@ pub async fn get_raw_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<V
     let _ = r.read_exact(&mut raw_addr[i..raw_addr_len + i + 2]).await;
     let a = &raw_addr[..raw_addr_len + i + 2];
     Ok(Vec::from(a))
+}
+
+pub fn get_address_from_vec(ary: &[u8]) -> io::Result<Address> {
+    let atyp = ary[0];
+
+    match atyp {
+        IPV4_ADDR => {
+            let raw_addr = &ary[1..1 + IPV4_LEN];
+            let ip = Ipv4Addr::new(raw_addr[0], raw_addr[1], raw_addr[2], raw_addr[3]);
+            let port = u16::from_be_bytes([ary[1 + IPV4_LEN], ary[IPV4_LEN + 2]]);
+            debug!("{}", ip);
+            Ok(Address::SocketAddr(SocketAddr::V4(SocketAddrV4::new(
+                ip, port,
+            ))))
+        }
+        DOMAIN_ADDR => {
+            let len = ary[1] as usize;
+            let raw_addr = &ary[2..2 + len];
+            let host = str::from_utf8(&raw_addr).unwrap().to_string();
+            let port = u16::from_be_bytes([ary[2 + len], ary[len + 3]]);
+
+            debug!("DOMAIN_ADDR {}", host);
+            Ok(Address::DomainAddr(host, port))
+        }
+        IPV6_ADDR => {
+            let raw_addr = &ary[1..1 + IPV6_LEN];
+            let port = u16::from_be_bytes([ary[1 + IPV6_LEN], ary[IPV6_LEN + 2]]);
+            let ip = Ipv6Addr::new(
+                u16::from_be_bytes([raw_addr[0], raw_addr[1]]),
+                u16::from_be_bytes([raw_addr[2], raw_addr[3]]),
+                u16::from_be_bytes([raw_addr[4], raw_addr[5]]),
+                u16::from_be_bytes([raw_addr[6], raw_addr[7]]),
+                u16::from_be_bytes([raw_addr[8], raw_addr[9]]),
+                u16::from_be_bytes([raw_addr[10], raw_addr[11]]),
+                u16::from_be_bytes([raw_addr[12], raw_addr[13]]),
+                u16::from_be_bytes([raw_addr[14], raw_addr[15]]),
+            );
+            debug!("Ipv6 {}", ip);
+            Ok(Address::SocketAddr(SocketAddr::V6(SocketAddrV6::new(
+                ip, port, 0, 0,
+            ))))
+        }
+        _ => {
+            debug!("unsupported address type");
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "unsupported address type",
+            ));
+        }
+    }
 }

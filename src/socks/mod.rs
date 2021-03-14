@@ -1,6 +1,5 @@
-#![allow(dead_code)]
-
 // Package socks5 implements socks5 proxy protocol.
+use log::{debug, error, info};
 use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -11,7 +10,6 @@ use crate::crypto::{CryptoReader, CryptoWriter};
 use crate::obfs::{ObfsReader, ObfsWriter};
 
 const SOCKSV5: u8 = 0x05;
-const DEBUG: bool = false;
 
 const CONNECT: u8 = 0x01;
 const BIND: u8 = 0x02;
@@ -64,19 +62,15 @@ impl TCPRelay {
     async fn hand_shake(&mut self, conn: &mut TcpStream) {
         // get socks version
         let ver = conn.read_u8().await.unwrap();
-        if DEBUG {
-            println!("Socks version {}", ver);
-        }
+        debug!("Socks version {}", ver);
 
         if ver != SOCKSV5 {
-            println!("Error version {}", ver);
+            error!("Error version {}", ver);
         }
 
         // read all method identifier octets
         let nmethods: usize = conn.read_u8().await.unwrap() as usize;
-        if DEBUG {
-            println!("Socks method {}", nmethods);
-        }
+        debug!("Socks method {}", nmethods);
 
         let mut raw = [0u8; 257];
         let _ = conn.read_exact(&mut raw[2..2 + nmethods]).await;
@@ -109,7 +103,7 @@ impl TCPRelay {
     async fn get_cmd(&mut self, conn: &mut TcpStream) -> u8 {
         let ver = conn.read_u8().await.unwrap();
         if ver != SOCKSV5 {
-            println!("Error version {}", ver);
+            error!("Error version {}", ver);
         }
         return conn.read_u8().await.unwrap();
     }
@@ -117,16 +111,13 @@ impl TCPRelay {
     // parse_request parses socks5 client request.
     async fn parse_request(&mut self, conn: &mut TcpStream) -> io::Result<(u8, Vec<u8>)> {
         let cmd = self.get_cmd(conn).await;
-
-        if DEBUG {
-            println!("Cmd {}", cmd);
-        }
+        debug!("Cmd {}", cmd);
 
         // check cmd type
         match cmd {
             CONNECT | BIND | UDP_ASSOCIATE => {}
             _ => {
-                println!("unknown cmd type");
+                error!("unknown cmd type");
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     "unsupported address type",
@@ -138,10 +129,6 @@ impl TCPRelay {
         let _ = conn.read_u8().await.unwrap();
 
         let addr = address::get_raw_address(conn).await.unwrap();
-        if DEBUG {
-            println!("{:?}", addr);
-        }
-
         Ok((cmd, addr))
     }
 
@@ -192,7 +179,7 @@ impl TCPRelay {
     // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
     async fn connect(self, conn: TcpStream, addr: Vec<u8>, server_cfg: &Server) {
         let server = TcpStream::connect(self.ss_server).await.unwrap();
-        println!("connected");
+        let remote_addr = server.peer_addr().unwrap();
 
         let (mut cr, mut cw) = conn.into_split();
         let (rr, rw) = server.into_split();
@@ -206,18 +193,20 @@ impl TCPRelay {
         let mut server_writer = CryptoWriter::new(&mut writer, &server_cfg.key);
         server_writer.write(addr.as_slice()).await.unwrap();
 
+        let pased_addr = address::get_address_from_vec(&addr).unwrap();
+        info!("connect to {} via {}", pased_addr, remote_addr);
+
         let sk = server_cfg.key.clone();
         tokio::spawn(async move {
             let mut server_reader = CryptoReader::new(&mut reader, &sk);
             if let Err(e) = io::copy(&mut server_reader, &mut cw).await {
-                println!("io remote copy failed {}", e);
+                error!("io remote copy failed {}", e);
             }
         });
 
         if let Err(e) = io::copy(&mut cr, &mut server_writer).await {
-            println!("io client copy failed {}", e);
+            error!("io client copy failed {}", e);
         }
-        println!("connect end")
     }
 
     // udp_associate handles UDP_ASSOCIATE cmd

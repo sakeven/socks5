@@ -159,7 +159,7 @@ where
                 break;
             }
         }
-        return Ok(()).into();
+        Ok(()).into()
     }
 }
 
