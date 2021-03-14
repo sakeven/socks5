@@ -3,6 +3,7 @@ use std::sync::Arc;
 use clap::{App, Arg};
 use log::{error, info};
 use pretty_env_logger;
+use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 
 use socks5::config;
@@ -10,9 +11,9 @@ use socks5::config::Server;
 use socks5::crypto;
 use socks5::socks::TCPRelay;
 
-async fn handle(stream: TcpStream, server: String, secret_key: &Server) {
+async fn handle(stream: TcpStream, server: String, secret_key: &Server) -> io::Result<()> {
     let socks5s = TCPRelay::new(server);
-    socks5s.serve(stream, secret_key).await;
+    socks5s.serve(stream, secret_key).await
 }
 
 #[tokio::main(worker_threads = 10)]
@@ -54,8 +55,6 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let _server = server.clone();
         let sk = server_cfg.clone();
-        tokio::spawn(async move {
-            handle(stream, _server, &sk).await;
-        });
+        tokio::spawn(async move { handle(stream, _server, &sk).await });
     }
 }
