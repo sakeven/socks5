@@ -77,11 +77,11 @@ impl<T> ObfsWriter<T>
 where
     T: io::AsyncWrite + std::marker::Unpin,
 {
-    pub fn new(writer: T) -> ObfsWriter<T> {
+    pub fn new(writer: T, obfs_url: String) -> ObfsWriter<T> {
         ObfsWriter {
             writer,
             inited: false,
-            obfs: Obfs::new("baidu.com".to_string()),
+            obfs: Obfs::new(obfs_url),
         }
     }
 }
@@ -103,14 +103,15 @@ where
             this.inited = true;
         }
 
-        ready!(Pin::new(&mut this.writer).poll_write(cx, buf))?;
-        Ok(buf.len()).into()
+        Pin::new(&mut this.writer).poll_write(cx, buf)
     }
 
+    #[inline]
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         Pin::new(&mut Pin::into_inner(self).writer).poll_flush(cx)
     }
 
+    #[inline]
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         Pin::new(&mut Pin::into_inner(self).writer).poll_shutdown(cx)
     }

@@ -16,6 +16,7 @@ rust-crypto = "0.2.36"
 hex = "0.4.2"
 base64 = "0.13.0"
 bstr = "0.2.15"
+clap = "2.33.3"
 
 [[bin]]
 name = "client"

@@ -61,10 +61,12 @@ where
         Ok(buf.len()).into()
     }
 
+    #[inline]
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         Pin::new(&mut Pin::into_inner(self).writer).poll_flush(cx)
     }
 
+    #[inline]
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         Pin::new(&mut Pin::into_inner(self).writer).poll_shutdown(cx)
     }
@@ -102,7 +104,7 @@ where
         }
     }
 
-    fn poll_read_exact0(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
+    fn poll_read_exact(&mut self, cx: &mut Context<'_>, size: usize) -> Poll<io::Result<()>> {
         assert_eq!(self.pos, 0);
         assert_ne!(size, 0);
         unsafe {
@@ -113,11 +115,14 @@ where
             let mut read_buf = ReadBuf::new(&mut self.buf[self.size..]);
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut read_buf)?);
             self.size += read_buf.filled().len();
+            if self.size == 0 {
+                return Ok(()).into();
+            }
             if self.size == last {
                 return Err(ErrorKind::UnexpectedEof.into()).into();
             }
         }
-        return Ok(()).into();
+        Ok(()).into()
     }
 }
 
@@ -153,7 +158,10 @@ where
                 return Ok(()).into();
             } else {
                 this.buf_need_ret = false;
-                ready!(this.poll_read_exact0(cx, size)?);
+                ready!(this.poll_read_exact(cx, size)?);
+                if this.size == 0 {
+                    return Ok(()).into();
+                }
                 assert_eq!(size, this.size);
                 this.size = this.crypto.decrypt(&mut this.buf);
             }

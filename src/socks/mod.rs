@@ -6,6 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::address;
+use crate::config::Server;
 use crate::crypto::{CryptoReader, CryptoWriter};
 use crate::obfs::{ObfsReader, ObfsWriter};
 
@@ -30,7 +31,7 @@ impl TCPRelay {
     }
 
     // serve handles connection between socks5 client and remote addr.
-    pub async fn serve(mut self, mut conn: TcpStream, secret_key: &Vec<u8>) {
+    pub async fn serve(mut self, mut conn: TcpStream, server: &Server) {
         self.hand_shake(&mut conn).await;
 
         // get cmd and address
@@ -39,7 +40,7 @@ impl TCPRelay {
 
         match cmd {
             CONNECT => {
-                self.connect(conn, addr, secret_key).await;
+                self.connect(conn, addr, server).await;
             }
             UDP_ASSOCIATE => self.udp_associate(&mut conn).await,
             BIND => {}
@@ -189,20 +190,25 @@ impl TCPRelay {
 
     // connect handles CONNECT cmd
     // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
-    async fn connect(self, conn: TcpStream, addr: Vec<u8>, secret_key: &Vec<u8>) {
+    async fn connect(self, conn: TcpStream, addr: Vec<u8>, server_cfg: &Server) {
         let server = TcpStream::connect(self.ss_server).await.unwrap();
-        let (mut cr, mut cw) = conn.into_split();
-        let (rr, rw) = server.into_split();
         println!("connected");
 
-        let mut obfs_writer = ObfsWriter::new(rw);
-        let mut obfs_reader = ObfsReader::new(rr);
-        let mut server_writer = CryptoWriter::new(&mut obfs_writer, secret_key);
+        let (mut cr, mut cw) = conn.into_split();
+        let (rr, rw) = server.into_split();
+        let mut writer: Box<dyn io::AsyncWrite + std::marker::Unpin + Send> = Box::new(rw);
+        let mut reader: Box<dyn io::AsyncRead + std::marker::Unpin + Send> = Box::new(rr);
+        if !server_cfg.obfs_url.is_empty() {
+            writer = Box::new(ObfsWriter::new(writer, server_cfg.obfs_url.clone()));
+            reader = Box::new(ObfsReader::new(reader));
+        }
+
+        let mut server_writer = CryptoWriter::new(&mut writer, &server_cfg.key);
         server_writer.write(addr.as_slice()).await.unwrap();
 
-        let sk = secret_key.clone();
+        let sk = server_cfg.key.clone();
         tokio::spawn(async move {
-            let mut server_reader = CryptoReader::new(&mut obfs_reader, &sk);
+            let mut server_reader = CryptoReader::new(&mut reader, &sk);
             if let Err(e) = io::copy(&mut server_reader, &mut cw).await {
                 println!("io remote copy failed {}", e);
             }
