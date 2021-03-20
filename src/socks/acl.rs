@@ -1,15 +1,15 @@
 use crate::address;
 use crate::config::{ACLConfig, MatchMode, Policy};
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 pub struct ACLManager {
-    rules: Mutex<ACLConfig>,
+    rules: RwLock<ACLConfig>,
 }
 
 impl ACLManager {
     pub fn new(rules: ACLConfig) -> Self {
         ACLManager {
-            rules: Mutex::new(rules),
+            rules: RwLock::new(rules),
         }
     }
 
@@ -37,7 +37,7 @@ impl ACLManager {
         let addr = format!("{}", _addr);
         let addr = addr.strip_prefix("http://").unwrap_or(addr.as_str());
         let addr = addr.strip_prefix("https://").unwrap_or(addr);
-        let rules = self.rules.lock().unwrap();
+        let rules = self.rules.read().unwrap();
         for rule in rules.rules.iter() {
             let func = ACLManager::get_fn(&rule.mode);
             for pattern in rule.pattern.iter() {
@@ -46,7 +46,6 @@ impl ACLManager {
                 }
             }
         }
-
         rules.fnl
     }
 }
