@@ -5,12 +5,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::address;
-use crate::config::{Policy, Server};
+use crate::config::Policy;
 use crate::crypto::{CryptoReader, CryptoWriter};
 use crate::obfs::{ObfsReader, ObfsWriter};
 use std::sync::Arc;
 
 pub mod acl;
+pub mod server;
 
 const SOCKS_V5: u8 = 0x05;
 
@@ -20,21 +21,24 @@ const UDP_ASSOCIATE: u8 = 0x03;
 
 // TCPRelay as a socks5 server and mika client.
 pub struct TCPRelay {
-    ss_server: String,
     acl_manager: Arc<acl::ACLManager>,
+    server_manager: Arc<server::ServerManager>,
 }
 
 impl TCPRelay {
     // TCPRelay::new creates a new Socks5 TCPRelay.
-    pub fn new(mika_server: String, acl_manager: Arc<acl::ACLManager>) -> TCPRelay {
+    pub fn new(
+        acl_manager: Arc<acl::ACLManager>,
+        server_manager: Arc<server::ServerManager>,
+    ) -> TCPRelay {
         TCPRelay {
-            ss_server: mika_server,
             acl_manager,
+            server_manager,
         }
     }
 
     // serve handles connection between socks5 client and remote addr.
-    pub async fn serve(mut self, mut conn: TcpStream, server: &Server) -> io::Result<()> {
+    pub async fn serve(mut self, mut conn: TcpStream) -> io::Result<()> {
         self.hand_shake(&mut conn).await?;
 
         // get cmd and address
@@ -43,7 +47,7 @@ impl TCPRelay {
 
         match cmd {
             CONNECT => {
-                self.connect(conn, addr, server).await?;
+                self.connect(conn, addr).await?;
             }
             UDP_ASSOCIATE => self.udp_associate(&mut conn).await,
             BIND => {}
@@ -191,12 +195,7 @@ impl TCPRelay {
         };
     }
 
-    async fn connect(
-        self,
-        mut conn: TcpStream,
-        addr: Vec<u8>,
-        server_cfg: &Server,
-    ) -> io::Result<()> {
+    async fn connect(self, mut conn: TcpStream, addr: Vec<u8>) -> io::Result<()> {
         let parsed_addr = address::get_address_from_vec(&addr)?;
 
         match self.acl_manager.acl(&parsed_addr) {
@@ -213,19 +212,17 @@ impl TCPRelay {
                 Ok(())
             }
             Policy::Reject => conn.shutdown().await,
-            Policy::Proxy => self.connect_by_proxy(conn, addr, server_cfg).await,
+            Policy::Proxy => self.connect_by_proxy(conn, addr).await,
         }
     }
 
     // connect handles CONNECT cmd
     // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
-    async fn connect_by_proxy(
-        self,
-        conn: TcpStream,
-        addr: Vec<u8>,
-        server_cfg: &Server,
-    ) -> io::Result<()> {
-        let server = TcpStream::connect(self.ss_server).await?;
+    async fn connect_by_proxy(self, conn: TcpStream, addr: Vec<u8>) -> io::Result<()> {
+        let server_cfg = self.server_manager.pick();
+
+        let server =
+            TcpStream::connect(format!("{}:{}", server_cfg.address, server_cfg.port)).await?;
         let remote_addr = server.peer_addr()?;
 
         let (mut cr, mut cw) = conn.into_split();

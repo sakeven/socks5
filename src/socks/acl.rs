@@ -34,10 +34,15 @@ impl ACLManager {
     }
 
     pub fn acl(&self, _addr: &address::Address) -> Policy {
+        let rules = self.rules.read().unwrap();
+
+        if !_addr.is_domain() {
+            return rules.fnl;
+        }
+
         let addr = format!("{}", _addr);
         let addr = addr.strip_prefix("http://").unwrap_or(addr.as_str());
         let addr = addr.strip_prefix("https://").unwrap_or(addr);
-        let rules = self.rules.read().unwrap();
         for rule in rules.rules.iter() {
             let func = ACLManager::get_fn(&rule.mode);
             for pattern in rule.pattern.iter() {

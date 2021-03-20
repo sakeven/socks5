@@ -20,6 +20,15 @@ pub enum Address {
     DomainAddr(String, u16),
 }
 
+impl Address {
+    pub fn is_domain(&self) -> bool {
+        match self {
+            Address::SocketAddr(_) => false,
+            Address::DomainAddr(_, _) => true,
+        }
+    }
+}
+
 impl Display for Address {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {

@@ -7,19 +7,18 @@ use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 
 use socks5::config;
-use socks5::config::Server;
 use socks5::crypto;
 use socks5::socks::acl;
+use socks5::socks::server;
 use socks5::socks::TCPRelay;
 
 async fn handle(
     stream: TcpStream,
-    server: String,
-    secret_key: &Server,
+    server_manager: Arc<server::ServerManager>,
     acl_manager: Arc<acl::ACLManager>,
 ) -> io::Result<()> {
-    let socks5s = TCPRelay::new(server, acl_manager);
-    socks5s.serve(stream, secret_key).await
+    let socks5s = TCPRelay::new(acl_manager, server_manager);
+    socks5s.serve(stream).await
 }
 
 #[tokio::main(worker_threads = 10)]
@@ -40,15 +39,15 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
     let config_path = matches.value_of("config").unwrap_or("mika.cfg");
-    let cfg = config::parse_conf(config_path.to_string())?;
+    let mut cfg = config::parse_conf(config_path.to_string())?;
 
-    let server = format!("{}:{}", cfg.server[0].address, cfg.server[0].port);
-    let key = crypto::evp_bytes_to_key(cfg.server[0].password.clone(), 16);
-    let mut server_cfg = cfg.server[0].clone();
-    server_cfg.key = key;
-    let server_cfg = Arc::new(server_cfg);
+    for srv in cfg.server.iter_mut() {
+        let key = crypto::evp_bytes_to_key(srv.password.clone(), 16);
+        srv.key = key
+    }
 
     let acl_manager = Arc::new(acl::ACLManager::new(cfg.acl_cfg));
+    let server_manager = Arc::new(server::ServerManager::new(cfg.server));
 
     let local = format!("{}:{}", cfg.local[0].address, cfg.local[0].port);
     let listen = TcpListener::bind(&local).await?;
@@ -61,9 +60,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
         };
-        let _server = server.clone();
-        let sk = server_cfg.clone();
+        let sk = server_manager.clone();
         let acl_manager = acl_manager.clone();
-        tokio::spawn(async move { handle(stream, _server, &sk, acl_manager).await });
+        tokio::spawn(async move { handle(stream, sk, acl_manager).await });
     }
 }

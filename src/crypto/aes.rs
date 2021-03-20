@@ -60,9 +60,6 @@ impl Encrypto for Aes128Gcm0 {
         self.wait_consume = true;
         &self.buf
     }
-    fn reset(&mut self) {
-        self.wait_consume = false;
-    }
 
     fn encrypt(&mut self, plaintext: &[u8]) -> &Vec<u8> {
         if self.wait_consume {
@@ -101,6 +98,10 @@ impl Encrypto for Aes128Gcm0 {
 
         self.wait_consume = true;
         &self.buf
+    }
+
+    fn reset(&mut self) {
+        self.wait_consume = false;
     }
 }
 
