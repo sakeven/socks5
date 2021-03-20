@@ -44,12 +44,10 @@ impl TCPRelay {
     }
 
     async fn new_conn(addr: address::Address) -> TcpStream {
-        match addr {
-            address::Address::SocketAddr(_addr) => {
-                return TcpStream::connect(_addr).await.unwrap();
-            }
+        return match addr {
+            address::Address::SocketAddr(_addr) => TcpStream::connect(_addr).await.unwrap(),
             address::Address::DomainAddr(ref _host, _port) => {
-                return TcpStream::connect((&_host[..], _port)).await.unwrap();
+                TcpStream::connect((&_host[..], _port)).await.unwrap()
             }
         };
     }

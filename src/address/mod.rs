@@ -26,9 +26,11 @@ impl Display for Address {
             Address::SocketAddr(addr) => {
                 write!(f, "{}", addr)
             }
-            Address::DomainAddr(host, port) => {
-                write!(f, "{}:{}", host, port)
-            }
+            Address::DomainAddr(host, port) => match port {
+                80 => write!(f, "http://{}", host),
+                443 => write!(f, "https://{}", host),
+                _ => write!(f, "{}:{}", host, port),
+            },
         }
     }
 }

@@ -9,10 +9,16 @@ use tokio::net::{TcpListener, TcpStream};
 use socks5::config;
 use socks5::config::Server;
 use socks5::crypto;
+use socks5::socks::acl;
 use socks5::socks::TCPRelay;
 
-async fn handle(stream: TcpStream, server: String, secret_key: &Server) -> io::Result<()> {
-    let socks5s = TCPRelay::new(server);
+async fn handle(
+    stream: TcpStream,
+    server: String,
+    secret_key: &Server,
+    acl_manager: Arc<acl::ACLManager>,
+) -> io::Result<()> {
+    let socks5s = TCPRelay::new(server, acl_manager);
     socks5s.serve(stream, secret_key).await
 }
 
@@ -42,6 +48,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     server_cfg.key = key;
     let server_cfg = Arc::new(server_cfg);
 
+    let acl_manager = Arc::new(acl::ACLManager::new(cfg.acl_cfg));
+
     let local = format!("{}:{}", cfg.local[0].address, cfg.local[0].port);
     let listen = TcpListener::bind(&local).await?;
     info!("Server listens at {}.", local);
@@ -55,6 +63,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let _server = server.clone();
         let sk = server_cfg.clone();
-        tokio::spawn(async move { handle(stream, _server, &sk).await });
+        let acl_manager = acl_manager.clone();
+        tokio::spawn(async move { handle(stream, _server, &sk, acl_manager).await });
     }
 }

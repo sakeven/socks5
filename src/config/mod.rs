@@ -29,6 +29,8 @@ pub struct Local {
 pub struct Config {
     pub server: Vec<Server>,
     pub local: Vec<Local>,
+    #[serde(rename = "acl")]
+    pub acl_cfg: ACLConfig,
 }
 
 pub fn parse_conf(path: String) -> Result<Config> {
@@ -38,4 +40,32 @@ pub fn parse_conf(path: String) -> Result<Config> {
         Err(_err) => return Err(Error::new(ErrorKind::Other, _err)),
     };
     return Ok(cfg);
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum MatchMode {
+    DomainSuffix,
+    DomainKeyword,
+    Domain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Policy {
+    Direct,
+    Proxy,
+    Reject,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ACLConfig {
+    pub rules: Vec<ProxyRule>,
+    #[serde(rename = "final")]
+    pub fnl: Policy,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProxyRule {
+    pub pattern: Vec<String>,
+    pub mode: MatchMode,
+    pub policy: Policy,
 }
