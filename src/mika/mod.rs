@@ -30,7 +30,7 @@ impl TCPRelay {
 
         // get cmd and address
         let addr = address::get_address(&mut client_reader).await.unwrap();
-        let remote = TCPRelay::new_conn(addr).await;
+        let remote = addr.new_conn().await.unwrap();
         let (mut rr, mut rw) = remote.into_split();
         let sk = secret_key.clone();
         tokio::spawn(async move {
@@ -41,14 +41,5 @@ impl TCPRelay {
             println!("io copy failed {}", e);
             return;
         }
-    }
-
-    async fn new_conn(addr: address::Address) -> TcpStream {
-        return match addr {
-            address::Address::SocketAddr(_addr) => TcpStream::connect(_addr).await.unwrap(),
-            address::Address::DomainAddr(ref _host, _port) => {
-                TcpStream::connect((&_host[..], _port)).await.unwrap()
-            }
-        };
     }
 }

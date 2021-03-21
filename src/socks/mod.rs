@@ -6,8 +6,6 @@ use tokio::net::TcpStream;
 
 use crate::address;
 use crate::config::Policy;
-use crate::crypto::{CryptoReader, CryptoWriter};
-use crate::obfs::{ObfsReader, ObfsWriter};
 use std::sync::Arc;
 
 pub mod acl;
@@ -186,22 +184,13 @@ impl TCPRelay {
         Ok(())
     }
 
-    async fn new_conn(addr: address::Address) -> TcpStream {
-        return match addr {
-            address::Address::SocketAddr(_addr) => TcpStream::connect(_addr).await.unwrap(),
-            address::Address::DomainAddr(ref _host, _port) => {
-                TcpStream::connect((&_host[..], _port)).await.unwrap()
-            }
-        };
-    }
-
     async fn connect(self, mut conn: TcpStream, addr: Vec<u8>) -> io::Result<()> {
         let parsed_addr = address::get_address_from_vec(&addr)?;
 
         match self.acl_manager.acl(&parsed_addr) {
             Policy::Direct => {
-                info!("directly connect to {}", parsed_addr);
-                let server = TCPRelay::new_conn(parsed_addr).await;
+                info!("directly connect to {}", &parsed_addr);
+                let server = parsed_addr.new_conn().await?;
                 let (mut cr, mut cw) = conn.into_split();
                 let (mut server_reader, mut server_writer) = server.into_split();
 
@@ -219,30 +208,14 @@ impl TCPRelay {
     // connect handles CONNECT cmd
     // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
     async fn connect_by_proxy(self, conn: TcpStream, addr: Vec<u8>) -> io::Result<()> {
-        let server_cfg = self.server_manager.pick();
-
-        let server =
-            TcpStream::connect(format!("{}:{}", server_cfg.address, server_cfg.port)).await?;
-        let remote_addr = server.peer_addr()?;
-
         let (mut cr, mut cw) = conn.into_split();
-        let (rr, rw) = server.into_split();
-        let mut writer: Box<dyn io::AsyncWrite + std::marker::Unpin + Send> = Box::new(rw);
-        let mut reader: Box<dyn io::AsyncRead + std::marker::Unpin + Send> = Box::new(rr);
-        if !server_cfg.obfs_url.is_empty() {
-            writer = Box::new(ObfsWriter::new(writer, server_cfg.obfs_url.clone()));
-            reader = Box::new(ObfsReader::new(reader));
-        }
-
-        let mut server_writer = CryptoWriter::new(&mut writer, &server_cfg.key);
+        let (mut server_writer, mut server_reader, remote_addr) =
+            self.server_manager.pick_one().await?;
         server_writer.write(addr.as_slice()).await?;
 
         let parsed_addr = address::get_address_from_vec(&addr)?;
-        info!("connect to {} via {}", parsed_addr, remote_addr);
-
-        let sk = server_cfg.key.clone();
+        info!("connect to {} via {}", &parsed_addr, remote_addr);
         tokio::spawn(async move {
-            let mut server_reader = CryptoReader::new(&mut reader, &sk);
             if let Err(e) = io::copy(&mut server_reader, &mut cw).await {
                 error!("io remote copy failed {}", e);
             }

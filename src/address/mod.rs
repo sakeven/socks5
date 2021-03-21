@@ -6,6 +6,7 @@ use std::vec;
 use log::debug;
 use tokio::io;
 use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
 
 pub const IPV4_ADDR: u8 = 0x1;
 pub const DOMAIN_ADDR: u8 = 0x3;
@@ -26,6 +27,20 @@ impl Address {
             Address::SocketAddr(_) => false,
             Address::DomainAddr(_, _) => true,
         }
+    }
+
+    pub fn domain(&self) -> String {
+        match self {
+            Address::DomainAddr(host, _) => host.clone(),
+            _ => String::new(),
+        }
+    }
+
+    pub async fn new_conn(self) -> io::Result<TcpStream> {
+        return match self {
+            Address::SocketAddr(_addr) => TcpStream::connect(_addr).await,
+            Address::DomainAddr(ref _host, _port) => TcpStream::connect((&_host[..], _port)).await,
+        };
     }
 }
 
