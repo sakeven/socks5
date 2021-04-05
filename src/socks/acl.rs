@@ -37,7 +37,7 @@ impl ACLManager {
         let rules = &self.rules.read().unwrap();
 
         if !_addr.is_domain() {
-            return rules.fnl;
+            return rules.fnl.clone();
         }
 
         let addr = _addr.domain();
@@ -45,10 +45,10 @@ impl ACLManager {
             let match_fn = ACLManager::get_match_fn(&rule.mode);
             for pattern in rule.pattern.iter() {
                 if match_fn(pattern, &addr) {
-                    return rule.policy;
+                    return rule.policy.clone();
                 }
             }
         }
-        rules.fnl
+        rules.fnl.clone()
     }
 }

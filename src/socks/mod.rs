@@ -201,16 +201,23 @@ impl TCPRelay {
                 Ok(())
             }
             Policy::Reject => conn.shutdown().await,
-            Policy::Proxy => self.connect_by_proxy(conn, addr).await,
+            Policy::Proxy => self.connect_by_proxy(conn, addr, None).await,
+            Policy::ProxyGroup(pg) => self.connect_by_proxy(conn, addr, Some(pg)).await,
         }
     }
 
     // connect handles CONNECT cmd
     // Here is a bit magic. It acts as a mika client that redirects connection to mika server.
-    async fn connect_by_proxy(self, conn: TcpStream, addr: Vec<u8>) -> io::Result<()> {
+    async fn connect_by_proxy(
+        self,
+        conn: TcpStream,
+        addr: Vec<u8>,
+        pg: Option<String>,
+    ) -> io::Result<()> {
         let (mut cr, mut cw) = conn.into_split();
         let (mut server_writer, mut server_reader, remote_addr) =
-            self.server_manager.pick_one().await?;
+            self.server_manager.pick_one(pg).await?;
+
         server_writer.write(addr.as_slice()).await?;
 
         let parsed_addr = address::get_address_from_vec(&addr)?;

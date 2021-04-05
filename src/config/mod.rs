@@ -7,6 +7,8 @@ use serde_yaml;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct Server {
+    #[serde(default)]
+    pub id: String,
     pub address: String,
     pub port: i32,
     #[serde(default)]
@@ -28,6 +30,8 @@ pub struct Local {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     pub server: Vec<Server>,
+    #[serde(default)]
+    pub proxy_group: Vec<ProxyGroup>,
     pub local: Vec<Local>,
     #[serde(rename = "acl")]
     pub acl_cfg: ACLConfig,
@@ -49,11 +53,19 @@ pub enum MatchMode {
     Domain,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
 pub enum Policy {
     Direct,
     Proxy,
     Reject,
+    ProxyGroup(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProxyGroup {
+    pub id: String,
+    pub proxy_list: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -68,4 +80,39 @@ pub struct ProxyRule {
     pub pattern: Vec<String>,
     pub mode: MatchMode,
     pub policy: Policy,
+}
+
+use std::fmt;
+
+use serde::de::{self, Deserializer, Visitor};
+
+struct PolicyVisitor;
+
+impl<'de> Visitor<'de> for PolicyVisitor {
+    type Value = Policy;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an policy in string")
+    }
+
+    fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        match value {
+            "Proxy" => Ok(Policy::Proxy),
+            "Direct" => Ok(Policy::Direct),
+            "Reject" => Ok(Policy::Reject),
+            a => Ok(Policy::ProxyGroup(a.to_string())),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Policy {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Policy, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_i32(PolicyVisitor)
+    }
 }

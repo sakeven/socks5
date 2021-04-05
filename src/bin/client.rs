@@ -8,6 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use socks5::config;
 use socks5::crypto;
+use socks5::manager::HTTPManager;
 use socks5::socks::acl;
 use socks5::socks::server;
 use socks5::socks::TCPRelay;
@@ -47,11 +48,18 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let acl_manager = Arc::new(acl::ACLManager::new(cfg.acl_cfg));
-    let server_manager = Arc::new(server::ServerManager::new(cfg.server));
+    let server_manager = Arc::new(server::ServerManager::new(cfg.server, cfg.proxy_group));
 
     let local = format!("{}:{}", cfg.local[0].address, cfg.local[0].port);
     let listen = TcpListener::bind(&local).await?;
     info!("Server listens at {}.", local);
+
+    let sm = server_manager.clone();
+    tokio::spawn(async move {
+        let mgr = Arc::new(HTTPManager::new(sm));
+        mgr.start().await;
+    });
+
     loop {
         let (stream, _) = match listen.accept().await {
             Ok(a) => a,
