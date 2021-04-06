@@ -6,7 +6,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::socks::server::{ProxyGroupV, ServerManager};
+use crate::socks::server::{ProxyGroupStatePatch, ServerManager};
 
 pub struct HTTPManager {
     server_manager: Arc<ServerManager>,
@@ -53,7 +53,7 @@ impl HTTPManager {
         req: Request<Body>,
     ) -> Result<Response<Body>, Infallible> {
         let whole_body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-        let pgv: ProxyGroupV = serde_json::from_slice(whole_body.as_bytes()).unwrap();
+        let pgv: ProxyGroupStatePatch = serde_json::from_slice(whole_body.as_bytes()).unwrap();
         self.server_manager.update(&pgv);
         let proxy_groups = self.server_manager.get_state();
         let data = serde_json::to_string_pretty(&proxy_groups).unwrap();
