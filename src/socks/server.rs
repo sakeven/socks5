@@ -117,7 +117,7 @@ impl ServerManager {
         for (_, group) in proxy_group.iter() {
             all.push(group.clone());
         }
-
+        all.sort_by(|a, b| a.id.cmp(&b.id));
         all
     }
 
