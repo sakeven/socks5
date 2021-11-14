@@ -21,6 +21,7 @@ clap = "2.33.3"
 log = { version = "0.4", features = ["std", "serde"] }
 pretty_env_logger = "0.4.0"
 hyper = { version = "0.14", features = ["full"] }
+url = "2.2.2"
 
 [[bin]]
 name = "client"

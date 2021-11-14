@@ -37,7 +37,7 @@ impl ACLManager {
         let rules = &self.rules.read().unwrap();
 
         if !_addr.is_domain() {
-            return rules.fnl.clone();
+            return Policy::Direct;
         }
 
         let addr = _addr.domain();

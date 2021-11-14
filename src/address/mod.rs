@@ -1,7 +1,8 @@
 use std::fmt::{Display, Formatter, Result};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 use std::str;
 use std::vec;
+use url::{Host, Url};
 
 use log::debug;
 use tokio::io;
@@ -124,7 +125,7 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
                 .unwrap()
                 .to_string();
             debug!("DOMAIN_ADDR {}", host);
-            Ok(Address::DomainAddr(host, port))
+            get_address_from_url(host, port)
         }
         IPV6_ADDR => {
             let ip = Ipv6Addr::new(
@@ -143,6 +144,25 @@ pub async fn get_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<Addre
             ))))
         }
         _ => Err(io::Error::new(io::ErrorKind::Other, "can't parse address")),
+    }
+}
+
+// get_address_from_url checks host if is a ipv4 or ipv6 address and returns enum Address.
+pub fn get_address_from_url(host: String, port: u16) -> io::Result<Address> {
+    let url = Url::parse(format!("https://{}", host).as_str()).unwrap();
+    match url.host() {
+        Some(Host::Ipv4(ipv4)) => {
+            debug!("ipv4 addr");
+            Ok(Address::SocketAddr(SocketAddr::new(IpAddr::V4(ipv4), port)))
+        }
+        Some(Host::Ipv6(ipv6)) => {
+            debug!("ipv6 addr");
+            Ok(Address::SocketAddr(SocketAddr::new(IpAddr::V6(ipv6), port)))
+        }
+        _ => {
+            debug!("domain");
+            Ok(Address::DomainAddr(host, port))
+        }
     }
 }
 
@@ -174,7 +194,7 @@ pub async fn get_raw_address<T: Unpin + AsyncReadExt>(r: &mut T) -> io::Result<V
     Ok(Vec::from(a))
 }
 
-pub fn get_address_from_vec(ary: &[u8]) -> io::Result<Address> {
+pub fn parse_address_from_vec(ary: &[u8]) -> io::Result<Address> {
     let atyp = ary[0];
 
     match atyp {
@@ -192,9 +212,8 @@ pub fn get_address_from_vec(ary: &[u8]) -> io::Result<Address> {
             let raw_addr = &ary[2..2 + len];
             let host = str::from_utf8(&raw_addr).unwrap().to_string();
             let port = u16::from_be_bytes([ary[2 + len], ary[len + 3]]);
-
             debug!("DOMAIN_ADDR {}", host);
-            Ok(Address::DomainAddr(host, port))
+            get_address_from_url(host, port)
         }
         IPV6_ADDR => {
             let raw_addr = &ary[1..1 + IPV6_LEN];

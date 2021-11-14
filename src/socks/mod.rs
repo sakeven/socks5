@@ -185,7 +185,7 @@ impl TCPRelay {
     }
 
     async fn connect(self, mut conn: TcpStream, addr: Vec<u8>) -> io::Result<()> {
-        let parsed_addr = address::get_address_from_vec(&addr)?;
+        let parsed_addr = address::parse_address_from_vec(&addr)?;
 
         match self.acl_manager.acl(&parsed_addr) {
             Policy::Direct => {
@@ -220,7 +220,7 @@ impl TCPRelay {
 
         server_writer.write(addr.as_slice()).await?;
 
-        let parsed_addr = address::get_address_from_vec(&addr)?;
+        let parsed_addr = address::parse_address_from_vec(&addr)?;
         info!("connect to {} via {}", &parsed_addr, remote_addr);
         tokio::spawn(async move {
             if let Err(e) = io::copy(&mut server_reader, &mut cw).await {
