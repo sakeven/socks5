@@ -37,6 +37,13 @@ impl Address {
         }
     }
 
+    pub fn ip_addr(&self) -> IpAddr {
+        match self {
+            Address::SocketAddr(host) => host.clone().ip(),
+            _ => IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        }
+    }
+
     pub async fn new_conn(self) -> io::Result<TcpStream> {
         return match self {
             Address::SocketAddr(_addr) => TcpStream::connect(_addr).await,

@@ -51,6 +51,7 @@ pub enum MatchMode {
     DomainSuffix,
     DomainKeyword,
     Domain,
+    IpCidr,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
